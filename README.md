@@ -26,11 +26,12 @@ Traditional emergency workflows rely heavily on manual communication, fragmented
 
 ResQPilot transforms this process through:
 
-- 🤖 AI-assisted emergency assessment
+- 🤖 LM and SVM model based emergency assessment
 - 🎙️ Voice-driven symptom collection
 - 📍 Real-time GPS-based hospital routing
-- ⚡ Live WebSocket communication
+- ⚡ Live WebSocket communication for instant updates
 - 🏥 Instant hospital notification dashboards
+- 🚑 Instant Ambulance notification dashboard with fastest route navigation to Patient's real time location
 - 🧠 Intelligent triage prioritisation
 - 📊 Persistent emergency records
 
@@ -42,7 +43,7 @@ Instead of waiting until a patient reaches the hospital, medical teams receive s
 
 ResQPilot bridges the communication gap between citizens and hospitals by providing:
 
-- AI-powered emergency severity assessment
+-  LM and SVM model powered emergency severity assessment
 - Intelligent hospital recommendation
 - Real-time emergency broadcasting
 - Automated patient queue creation
@@ -50,6 +51,7 @@ ResQPilot bridges the communication gap between citizens and hospitals by provid
 - Reduced emergency admission time
 - Improved hospital resource utilization
 - Faster clinical decision support
+- Better Healthcare support for public
 
 ---
 
@@ -61,7 +63,7 @@ ResQPilot bridges the communication gap between citizens and hospitals by provid
 |------------|----------|
 | React (Vite) | Component-based SPA |
 | Tailwind CSS | Responsive UI styling |
-| Socket.IO Client | Real-time communication |
+| Socket.IO Client | Real-time communication via websockets |
 | Google GenAI SDK | AI conversation, voice understanding & triage assistance |
 | Browser Geolocation API | Live GPS coordinates |
 | Web Speech API | Voice capture & transcription |
@@ -74,9 +76,9 @@ ResQPilot bridges the communication gap between citizens and hospitals by provid
 |------------|----------|
 | Node.js | Runtime environment |
 | Express.js | REST API server |
-| Socket.IO | Real-time event broadcasting |
+| Socket.IO | Real-time event logging & broadcasting |
 | Mongoose | MongoDB Object Document Mapper |
-| MongoDB Atlas | Cloud database |
+| MongoDB Atlas | Cloud database for storage of patient data |
 | Async/Await | Non-blocking database operations |
 
 ---
@@ -135,12 +137,11 @@ Stores:
 ────────────────────────────────────────────────────
                            │
                      Node.js Backend
-                      Express Server
                            │
             ┌──────────────┴──────────────┐
             │                             │
       Google GenAI                 Socket.IO Server
-      Symptom Analysis                  Broadcast
+     Speech to text                  Broadcast
             │                             │
             └──────────────┬──────────────┘
                            │
@@ -149,7 +150,7 @@ Stores:
                  MongoDB Atlas Database
               resqpilot.patients Collection
                            │
-                 Hospital Dashboard Clients
+Hospital Dashboard Clients + Ambulance Dashboard portal
                            │
              Live Emergency Queue Management
 ```
