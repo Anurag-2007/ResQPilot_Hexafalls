@@ -108,12 +108,40 @@ export default function HospitalQueue() {
   const [editForm, setEditForm] = useState({ icuBeds: 0, wardBudget: 0 });
 
   // Global Filter states
-  const [cardiologyFilter, CardiologyFilter] = useState("all"); 
+  const [cardiologyFilter, setCardiologyFilter] = useState("all"); 
   const [neurologyFilter, setNeurologyFilter] = useState("all");     
 
   // Mapping of hospitalId -> array of incoming queue items
   const [hospitalQueues, setHospitalQueues] = useState({});
   const [expandedId, setExpandedId] = useState(null);
+
+  // Send Hospital details payload to external API endpoint on mount using the requested format
+  useEffect(() => {
+    const postHospitalsData = async () => {
+      try {
+        const externalApiPayload = {
+          desc: JSON.stringify(INITIAL_HOSPITALS)
+        };
+
+        const response = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_hospital", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(externalApiPayload)
+        });
+
+        if (!response.ok) {
+          console.error("External prediction API error status:", response.status);
+        } else {
+          const data = await response.json();
+          console.log("Successfully posted hospitals to external API:", data);
+        }
+      } catch (apiErr) {
+        console.error("Failed to post payload to external API:", apiErr);
+      }
+    };
+
+    postHospitalsData();
+  }, []);
 
   // Live ETA countdown timer loop updated every second
   useEffect(() => {
@@ -309,9 +337,9 @@ export default function HospitalQueue() {
             <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2 text-xs">
                 <span className="font-bold text-slate-600 dark:text-slate-400">Cardiology:</span>
-                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "all"} onChange={() => CardiologyFilter("all")} /> All</label>
-                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "1"} onChange={() => CardiologyFilter("1")} /> Yes</label>
-                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "0"} onChange={() => CardiologyFilter("0")} /> No</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "all"} onChange={() => setCardiologyFilter("all")} /> All</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "1"} onChange={() => setCardiologyFilter("1")} /> Yes</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "0"} onChange={() => setCardiologyFilter("0")} /> No</label>
               </div>
 
               <div className="flex items-center gap-2 text-xs">
