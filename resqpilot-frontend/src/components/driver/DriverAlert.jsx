@@ -5,8 +5,9 @@ import LiveTrackingMap from "../maps/LiveTrackingMap";
 import { io } from "socket.io-client";
 
 // Connect to your production/local backend server via WebSockets
-const socket = io("http://localhost:5000");
-
+const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", { 
+  autoConnect: true 
+});
 // 5 Mock Ambulances with strategic coordinates and varied triage levels
 const INITIAL_AMBULANCES = [
   { id: "amb-1", name: "Ambulance Alpha", lat: 22.7500, lng: 88.5000, triageLevel: 1 },

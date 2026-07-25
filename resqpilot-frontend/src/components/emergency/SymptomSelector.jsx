@@ -5,7 +5,9 @@ import { useEmergencyStore } from "../../store/useEmergencyStore";
 import { io } from "socket.io-client";
 
 // Connect to the backend server for production real-time sync via WebSockets
-const socket = io("http://localhost:5000"); // Change to your production backend URL when deployed
+const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", { 
+  autoConnect: true 
+});// Change to your production backend URL when deployed
 
 const COMMON_SYMPTOMS = ["Chest Pain", "Shortness of Breath", "Severe Bleeding", "Unconscious", "Seizures", "Severe Burns", "Fractures", "Head Injury", "Stroke Symptoms", "Allergic Reaction", "Burns"];
 

@@ -9,7 +9,9 @@ import { useEmergencyStore } from "../../store/useEmergencyStore";
 import { io } from "socket.io-client";
 
 // Connect to backend server via WebSockets
-const socket = io("http://localhost:5000", { autoConnect: true });
+const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", { 
+  autoConnect: true 
+});
 
 // Initial Mock Hospitals Database with coordinates, distances, and editable beds
 const INITIAL_HOSPITALS = [
