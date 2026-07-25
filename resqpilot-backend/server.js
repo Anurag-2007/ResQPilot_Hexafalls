@@ -3,6 +3,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
 app.use(cors());
@@ -14,7 +15,7 @@ const io = new Server(server, {
 });
 
 // Connect to MongoDB specifying the "resqpilot" database
-mongoose.connect("mongodb+srv://biswasadrisha70_db_user:a4PUUnqa4b6saH8W@adrisha.qbvh2pv.mongodb.net/resqpilot?retryWrites=true&w=majority&appName=Adrisha")
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("Connected to MongoDB successfully"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
