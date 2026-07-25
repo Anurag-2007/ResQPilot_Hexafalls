@@ -224,8 +224,15 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
         // Send age and total_criticality_level to the specified external endpoint
         try {
           const externalApiPayload = {
-            age: Number(member.age) || 0,
-            //total_criticality_level: totalPainLevel
+            age: member.age,
+            pain_level: totalPainLevel,
+            chronic_disease_count: chronicDiseaseCount,
+            chronic_diseases_list: chronicDiseasesList,
+            previous_er_visit: previousErVisitsCount,
+            arrival_mode: mostSevereArrivalMode,
+            heart_rate: 83.19444,
+            sytolic_bl: 128.2164,
+            body_temp: 37.24405
           };
 
           const apiResponse = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/index", {
@@ -352,3 +359,4 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     </div>
   );
 }
+
