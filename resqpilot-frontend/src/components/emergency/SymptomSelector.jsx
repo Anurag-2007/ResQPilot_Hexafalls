@@ -225,7 +225,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
         try {
           const externalApiPayload = {
             age: Number(member.age) || 0,
-            total_criticality_level: totalPainLevel
+            //total_criticality_level: totalPainLevel
           };
 
           const apiResponse = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/index", {
