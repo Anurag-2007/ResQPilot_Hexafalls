@@ -221,7 +221,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
         // Emit real-time dispatch event over WebSockets to backend server & MongoDB
         socket.emit("citizen_dispatch", dispatchPayload);
 
-        // Send age and total_criticality_level to the specified external endpoint
+        // Send payload to the specified external endpoint
         try {
           const externalApiPayload = {
             age: member.age,
@@ -235,7 +235,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             body_temp: 37.24405
           };
 
-          const apiResponse = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/index", {
+          const apiResponse = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_ambulance", {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -252,15 +252,6 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
         } catch (apiErr) {
           console.error("Failed to post payload to external API:", apiErr);
         }
-
-        // Generate local backup file download as well
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dispatchPayload, null, 2));
-        const downloadAnchor = document.createElement("a");
-        downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", `${member.name.replace(/\s+/g, '_')}_dispatch_report.json`);
-        document.body.appendChild(downloadAnchor);
-        downloadAnchor.click();
-        downloadAnchor.remove();
 
         alert(`Dispatch confirmed for ${member.name}. Broadcasted to fleet server successfully!`);
       },
@@ -359,4 +350,3 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     </div>
   );
 }
-
