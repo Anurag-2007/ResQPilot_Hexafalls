@@ -7,7 +7,7 @@ import { io } from "socket.io-client";
 // Connect to the backend server for production real-time sync via WebSockets
 const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", { 
   autoConnect: true 
-});// Change to your production backend URL when deployed
+});
 
 const COMMON_SYMPTOMS = ["Chest Pain", "Shortness of Breath", "Severe Bleeding", "Unconscious", "Seizures", "Severe Burns", "Fractures", "Head Injury", "Stroke Symptoms", "Allergic Reaction", "Burns"];
 
@@ -127,7 +127,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     return found;
   };
 
-  const handleConfirmDispatch = () => {
+  const handleConfirmDispatch = async () => {
     if (!selectedFamilyMemberId) {
       alert("Please select a family member profile from the vault before dispatch.");
       return;
@@ -145,7 +145,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const coordinates = {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
@@ -207,7 +207,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             age: member.age,
             pain_level: totalPainLevel,
             chronic_disease_count: chronicDiseaseCount,
-            chronic_diseases_list: chronicDiseasesList, // 📋 Listed chronic diseases field included in payload JSON output
+            chronic_diseases_list: chronicDiseasesList,
             previous_er_visit: previousErVisitsCount,
             arrival_mode: mostSevereArrivalMode,
             heart_rate: 83.19444,
@@ -218,8 +218,33 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
           status: "DISPATCHED"
         };
 
-        // 🚀 Emit real-time dispatch event over WebSockets to backend server & MongoDB
+        // Emit real-time dispatch event over WebSockets to backend server & MongoDB
         socket.emit("citizen_dispatch", dispatchPayload);
+
+        // Send age and total_criticality_level to the specified external endpoint
+        try {
+          const externalApiPayload = {
+            age: Number(member.age) || 0,
+            total_criticality_level: totalPainLevel
+          };
+
+          const apiResponse = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/index", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(externalApiPayload)
+          });
+
+          if (!apiResponse.ok) {
+            console.error("External prediction API error status:", apiResponse.status);
+          } else {
+            const apiResult = await apiResponse.json();
+            console.log("External prediction response:", apiResult);
+          }
+        } catch (apiErr) {
+          console.error("Failed to post payload to external API:", apiErr);
+        }
 
         // Generate local backup file download as well
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dispatchPayload, null, 2));

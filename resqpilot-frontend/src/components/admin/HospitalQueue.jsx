@@ -3,7 +3,8 @@ import {
   Activity, Clock, Truck, AlertTriangle, CheckCircle2, Bed, 
   Thermometer, ChevronDown, ChevronUp, Plus, Minus, User, 
   Phone, ShieldAlert, HeartPulse, Stethoscope, Sparkles,
-  Zap, ToggleLeft, ToggleRight, Building2, Check, X, Navigation, MapPin
+  Zap, ToggleLeft, ToggleRight, Building2, Check, X, Navigation, MapPin,
+  BedSingle
 } from "lucide-react";
 import { useEmergencyStore } from "../../store/useEmergencyStore";
 import { io } from "socket.io-client";
@@ -13,7 +14,7 @@ const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", {
   autoConnect: true 
 });
 
-// Initial Mock Hospitals Database with coordinates, distances, and editable beds
+// Initial Mock Hospitals Database with coordinates, ward budgets, and independent attributes
 const INITIAL_HOSPITALS = [
   {
     id: "hosp-1",
@@ -21,11 +22,13 @@ const INITIAL_HOSPITALS = [
     address: "54 Canal Circular Rd, Kolkata",
     lat: 22.5780,
     lng: 88.4100,
-    distanceKm: 2.4,
-    erBeds: 12,
+    distanceKm: null,
+    etaMins: null,
+    wardBudget: 450,
     icuBeds: 4,
-    erActive: true,
-    icuActive: true
+    icuActive: true,
+    cardiologyDept: 1,
+    neurologyDept: 1
   },
   {
     id: "hosp-2",
@@ -33,11 +36,13 @@ const INITIAL_HOSPITALS = [
     address: "730 Anandapur, EM Bypass, Kolkata",
     lat: 22.5180,
     lng: 88.4050,
-    distanceKm: 5.8,
-    erBeds: 8,
+    distanceKm: null,
+    etaMins: null,
+    wardBudget: 350,
     icuBeds: 2,
-    erActive: true,
-    icuActive: true
+    icuActive: true,
+    cardiologyDept: 1,
+    neurologyDept: 0
   },
   {
     id: "hosp-3",
@@ -45,11 +50,13 @@ const INITIAL_HOSPITALS = [
     address: "JC Block, Sector III, Salt Lake, Kolkata",
     lat: 22.5850,
     lng: 88.4020,
-    distanceKm: 3.1,
-    erBeds: 5,
+    distanceKm: null,
+    etaMins: null,
+    wardBudget: 300,
     icuBeds: 0,
-    erActive: true,
-    icuActive: false
+    icuActive: false,
+    cardiologyDept: 0,
+    neurologyDept: 1
   },
   {
     id: "hosp-4",
@@ -57,11 +64,13 @@ const INITIAL_HOSPITALS = [
     address: "360 Panchasayar, Garia, Kolkata",
     lat: 22.4850,
     lng: 88.3900,
-    distanceKm: 9.5,
-    erBeds: 15,
+    distanceKm: null,
+    etaMins: null,
+    wardBudget: 400,
     icuBeds: 6,
-    erActive: true,
-    icuActive: true
+    icuActive: true,
+    cardiologyDept: 1,
+    neurologyDept: 1
   },
   {
     id: "hosp-5",
@@ -69,11 +78,13 @@ const INITIAL_HOSPITALS = [
     address: "244 AJC Bose Rd, Bhowanipore, Kolkata",
     lat: 22.5410,
     lng: 88.3440,
-    distanceKm: 6.2,
-    erBeds: 20,
+    distanceKm: null,
+    etaMins: null,
+    wardBudget: 200,
     icuBeds: 3,
-    erActive: true,
-    icuActive: true
+    icuActive: true,
+    cardiologyDept: 1,
+    neurologyDept: 0
   }
 ];
 
@@ -94,7 +105,11 @@ export default function HospitalQueue() {
   const [hospitals, setHospitals] = useState(INITIAL_HOSPITALS);
   const [selectedHospitalForView, setSelectedHospitalForView] = useState(null);
   const [editingHospitalId, setEditingHospitalId] = useState(null);
-  const [editForm, setEditForm] = useState({ erBeds: 0, icuBeds: 0 });
+  const [editForm, setEditForm] = useState({ icuBeds: 0, wardBudget: 0 });
+
+  // Global Filter states
+  const [cardiologyFilter, CardiologyFilter] = useState("all"); 
+  const [neurologyFilter, setNeurologyFilter] = useState("all");     
 
   // Mapping of hospitalId -> array of incoming queue items
   const [hospitalQueues, setHospitalQueues] = useState({});
@@ -137,10 +152,8 @@ export default function HospitalQueue() {
 
       if (!payload || !payload.dispatchId) return;
 
-      const painLevel = payload.emergencyAssessment?.pain_level || 3;
-      const triageNum = Math.min(5, Math.max(1, Math.ceil(painLevel / 2)));
-      
-      // Extract chronic diseases list array sent from SymptomSelector
+      const triageNum = 3;
+      const criticalLevel = "Medium"; 
       const chronicList = payload.emergencyAssessment?.chronic_diseases_list || [];
 
       if (payload.locationCoordinates) {
@@ -148,12 +161,21 @@ export default function HospitalQueue() {
         const pLng = payload.locationCoordinates.longitude;
 
         setHospitals(prevHospitals => {
-          const evaluated = prevHospitals.map(h => ({
-            ...h,
-            distanceKm: Number(calculateHaversineDistance(h.lat, h.lng, pLat, pLng).toFixed(1))
-          }));
+          // Calculate exact distances and ETAs upon receiving patient coordinates
+          const evaluated = prevHospitals.map(h => {
+            const distance_km = Number(calculateHaversineDistance(h.lat, h.lng, pLat, pLng).toFixed(1));
+            // ETA (Time_Mins) = dist / 50 (converted to minutes)
+            const time_mins = Math.max(1, Math.round((distance_km / 50) * 60));
+            return {
+              ...h,
+              distanceKm: distance_km,
+              etaMins: time_mins
+            };
+          });
 
-          const nearest = evaluated.reduce((minObj, curr) => curr.distanceKm < minObj.distanceKm ? curr : minObj, evaluated[0]);
+          // Find nearest hospital based on calculated distance
+          const nearest = evaluated.reduce((minObj, curr) => (curr.distanceKm < minObj.distanceKm ? curr : minObj), evaluated[0]);
+          const assignedEtaSecs = (nearest.etaMins || 2) * 60;
 
           const newIncomingItem = {
             id: payload.dispatchId,
@@ -161,22 +183,23 @@ export default function HospitalQueue() {
             age: payload.patientProfile?.age || payload.emergencyAssessment?.age || "N/A",
             bloodGroup: payload.patientProfile?.bloodGroup || "N/A",
             triageLevel: triageNum,
-            symptoms: `Pain Level: ${painLevel}/10, Arrival Mode: ${payload.emergencyAssessment?.arrival_mode || 'Ambulance'}, Previous ER Visits: ${payload.emergencyAssessment?.previous_er_visit || 0}`,
-            eta: "2m 0s",
-            etaSeconds: 120,
+            criticalLevel: criticalLevel,
+            wardBudget: nearest.wardBudget,
+            symptoms: `Pain Level: ${payload.emergencyAssessment?.pain_level || 3}/10, Arrival Mode: ${payload.emergencyAssessment?.arrival_mode || 'Ambulance'}, Previous ER Visits: ${payload.emergencyAssessment?.previous_er_visit || 0}`,
+            eta: `${nearest.etaMins || 2}m 0s`,
+            etaSeconds: assignedEtaSecs,
             status: payload.status || "DISPATCHED",
             vitals: { 
               hr: `${payload.emergencyAssessment?.heart_rate ? Math.round(payload.emergencyAssessment.heart_rate) : 83} bpm`, 
               bp: `${Math.round(payload.emergencyAssessment?.sytolic_bl || 128)}/82`, 
               spo2: "97%" 
             },
-            // Mapped chronic diseases list array or fallback string
             conditions: chronicList.length > 0 ? chronicList : ["No chronic diseases reported"],
             allergies: payload.patientProfile?.allergies || "None reported",
             emergencyContact: payload.patientProfile?.emergencyContact || "Not provided",
             ambulanceId: "UNIT-09 (Advanced Life Support)",
             driverName: "Paramedic Dispatch Unit",
-            aiNotes: `Routed to ${nearest.name} based on nearest distance (${nearest.distanceKm} km). Pain Level: ${painLevel}/10, Body Temp: ${payload.emergencyAssessment?.body_temp || 'N/A'}°C.`,
+            aiNotes: `Routed to ${nearest.name} based on calculated distance (${nearest.distanceKm} km, ETA: ${nearest.etaMins} mins). Critical Level: ${criticalLevel}.`,
             locationCoordinates: payload.locationCoordinates
           };
 
@@ -207,12 +230,12 @@ export default function HospitalQueue() {
   const handleStartEdit = (e, hosp) => {
     e.stopPropagation();
     setEditingHospitalId(hosp.id);
-    setEditForm({ erBeds: hosp.erBeds, icuBeds: hosp.icuBeds });
+    setEditForm({ icuBeds: hosp.icuBeds, wardBudget: hosp.wardBudget });
   };
 
   const handleSaveEdit = (e, hospId) => {
     e.stopPropagation();
-    setHospitals(hospitals.map(h => h.id === hospId ? { ...h, erBeds: editForm.erBeds, icuBeds: editForm.icuBeds } : h));
+    setHospitals(hospitals.map(h => h.id === hospId ? { ...h, icuBeds: editForm.icuBeds, wardBudget: editForm.wardBudget } : h));
     setEditingHospitalId(null);
   };
 
@@ -236,7 +259,19 @@ export default function HospitalQueue() {
     }));
   };
 
-  const nearestHospitalId = hospitals.reduce((minObj, curr) => curr.distanceKm < minObj.distanceKm ? curr : minObj, hospitals[0])?.id;
+  // Filter hospitals based on Cardiology Dept and Neurology Dept radio selections
+  const filteredHospitals = hospitals.filter(h => {
+    if (cardiologyFilter !== "all" && String(h.cardiologyDept) !== cardiologyFilter) return false;
+    if (neurologyFilter !== "all" && String(h.neurologyDept) !== neurologyFilter) return false;
+    return true;
+  });
+
+  const nearestHospitalId = filteredHospitals.reduce((minObj, curr) => {
+    if (minObj.distanceKm === null) return curr;
+    if (curr.distanceKm === null) return minObj;
+    return curr.distanceKm < minObj.distanceKm ? curr : minObj;
+  }, filteredHospitals[0])?.id;
+
   const currentHospitalQueue = selectedHospitalForView ? (hospitalQueues[selectedHospitalForView.id] || []) : [];
 
   return (
@@ -260,7 +295,7 @@ export default function HospitalQueue() {
 
       {!selectedHospitalForView && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
             <div>
               <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 dark:text-slate-100">
                 <Building2 className="w-5 h-5 text-teal-600 dark:text-teal-400" /> Regional Hospital Network & Live Distances
@@ -269,13 +304,27 @@ export default function HospitalQueue() {
                 Select a hospital card to view its specific emergency requests and incoming status queue.
               </p>
             </div>
-            <span className="text-xs font-bold px-3 py-1 bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 rounded-full border border-teal-200 dark:border-teal-800/50 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" /> GPS Distance Sync Active
-            </span>
+            
+            {/* Department Filter Controls */}
+            <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold text-slate-600 dark:text-slate-400">Cardiology:</span>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "all"} onChange={() => CardiologyFilter("all")} /> All</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "1"} onChange={() => CardiologyFilter("1")} /> Yes</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="cardio" checked={cardiologyFilter === "0"} onChange={() => CardiologyFilter("0")} /> No</label>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold text-slate-600 dark:text-slate-400">Neurology:</span>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="neuro" checked={neurologyFilter === "all"} onChange={() => setNeurologyFilter("all")} /> All</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="neuro" checked={neurologyFilter === "1"} onChange={() => setNeurologyFilter("1")} /> Yes</label>
+                <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="neuro" checked={neurologyFilter === "0"} onChange={() => setNeurologyFilter("0")} /> No</label>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {hospitals.map((hosp) => {
+            {filteredHospitals.map((hosp) => {
               const isNearest = hosp.id === nearestHospitalId;
               const isEditing = editingHospitalId === hosp.id;
               const reqCount = (hospitalQueues[hosp.id] || []).length;
@@ -298,9 +347,16 @@ export default function HospitalQueue() {
                   <div>
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{hosp.name}</h3>
-                      <span className="text-xs font-black text-teal-600 dark:text-teal-400 bg-teal-100 dark:bg-teal-900/40 px-2 py-0.5 rounded shrink-0">
-                        {hosp.distanceKm} km
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-black text-teal-600 dark:text-teal-400 bg-teal-100 dark:bg-teal-900/40 px-2 py-0.5 rounded shrink-0">
+                          {hosp.distanceKm !== null ? `${hosp.distanceKm} km` : "Pending GPS"}
+                        </span>
+                        {hosp.etaMins !== null && (
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded shrink-0">
+                            ETA: {hosp.etaMins}m
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <p className="text-[11px] text-slate-500 mb-3 flex items-center gap-1">
                       <MapPin className="w-3 h-3 text-slate-400 shrink-0" /> {hosp.address}
@@ -308,23 +364,28 @@ export default function HospitalQueue() {
                   </div>
 
                   <div className="space-y-3 pt-3 border-t border-slate-200/60 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300">
+                      <span>Cardiology: <strong>{hosp.cardiologyDept === 1 ? "Yes" : "No"}</strong></span>
+                      <span>Neurology: <strong>{hosp.neurologyDept === 1 ? "Yes" : "No"}</strong></span>
+                    </div>
+
                     {isEditing ? (
                       <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-between text-xs">
-                          <span>ER Beds:</span>
-                          <input 
-                            type="number" 
-                            value={editForm.erBeds} 
-                            onChange={(e) => setEditForm({ ...editForm, erBeds: Number(e.target.value) })}
-                            className="w-16 p-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-center font-bold"
-                          />
-                        </div>
                         <div className="flex items-center justify-between text-xs">
                           <span>ICU Beds:</span>
                           <input 
                             type="number" 
                             value={editForm.icuBeds} 
                             onChange={(e) => setEditForm({ ...editForm, icuBeds: Number(e.target.value) })}
+                            className="w-16 p-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-center font-bold"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span>Budget ($):</span>
+                          <input 
+                            type="number" 
+                            value={editForm.wardBudget} 
+                            onChange={(e) => setEditForm({ ...editForm, wardBudget: Number(e.target.value) })}
                             className="w-16 p-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-center font-bold"
                           />
                         </div>
@@ -338,13 +399,13 @@ export default function HospitalQueue() {
                     ) : (
                       <>
                         <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
-                            <span className="block text-[10px] text-slate-400 uppercase font-bold">ER Beds</span>
-                            <span className="font-black text-slate-800 dark:text-slate-200">{hosp.erBeds}</span>
+                          <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-center flex items-center justify-center gap-1">
+                            <BedSingle className="w-3.5 h-3.5 text-teal-600" />
+                            <span className="text-[10px] text-slate-400 uppercase font-bold">ICU: {hosp.icuBeds}</span>
                           </div>
                           <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
-                            <span className="block text-[10px] text-slate-400 uppercase font-bold">ICU Beds</span>
-                            <span className="font-black text-slate-800 dark:text-slate-200">{hosp.icuBeds}</span>
+                            <span className="block text-[9px] text-slate-400 uppercase font-bold">Ward Budget</span>
+                            <span className="font-black text-teal-600 dark:text-teal-400">${hosp.wardBudget}</span>
                           </div>
                         </div>
 
@@ -353,7 +414,7 @@ export default function HospitalQueue() {
                             onClick={(e) => handleStartEdit(e, hosp)}
                             className="text-[11px] font-bold text-slate-500 hover:text-teal-600 transition-colors underline"
                           >
-                            Edit Beds
+                            Edit Ward Info
                           </button>
                           <button 
                             onClick={() => setSelectedHospitalForView(hosp)}
@@ -414,15 +475,21 @@ export default function HospitalQueue() {
                           {isArrived ? <CheckCircle2 className="w-5 h-5" /> : <Clock className="w-5 h-5 text-teal-600 dark:text-teal-400" />}
                           {isArrived ? "ARRIVED" : `ETA ${incident.eta}`}
                         </div>
-                        <span className="text-xs font-black tracking-wider px-2.5 py-1 rounded-md border bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50">
-                          Triage Level {incident.triageLevel}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black tracking-wider px-2 py-0.5 rounded-md border bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50">
+                            Triage {incident.triageLevel}
+                          </span>
+                          <span className="text-xs font-black tracking-wider px-2 py-0.5 rounded-md border bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/50">
+                            {incident.criticalLevel || "Medium"}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex-grow space-y-2">
                         <div className="flex items-center gap-3">
                           <span className={`text-base font-bold ${isArrived ? "text-slate-600 dark:text-slate-400" : "text-slate-900 dark:text-slate-100"}`}>{incident.patientName}</span>
                           <span className="text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">{incident.age} yrs • Blood: {incident.bloodGroup}</span>
+                          <span className="text-xs font-bold text-teal-600 bg-teal-50 dark:bg-teal-950/50 px-2 py-0.5 rounded">Ward Budget: ${incident.wardBudget}</span>
                         </div>
                         
                         <div className="flex items-center gap-4 text-xs font-bold text-slate-600 dark:text-slate-400">
