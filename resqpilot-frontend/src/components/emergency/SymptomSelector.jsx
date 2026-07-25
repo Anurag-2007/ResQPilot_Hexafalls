@@ -86,7 +86,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
       const base64Audio = await blobToBase64(audioBlob);
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: "gemini-3.5-flash",
         contents: [
           "Generate an accurate transcript of this speech to be used as clinical symptom description notes. Return only the plain transcript text without any introductory remarks.",
           {
