@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Button from "../common/Button";
 import { User, Activity, Droplet, Phone, AlertCircle, Plus, Trash2 } from "lucide-react";
 
@@ -12,20 +12,66 @@ const COMMON_CHRONIC_LIST = [
 ];
 
 export default function MedicalProfileForm({ initialData, onSubmit, onCancel, isLoading }) {
-  const [formData, setFormData] = useState(
-    initialData || {
-      name: "",
-      age: "",
-      bloodGroup: "O+",
-      chronicConditions: "",
-      allergies: "",
-      emergencyContact: "",
-    }
-  );
+  const [formData, setFormData] = useState({
+    name: "",
+    age: "",
+    bloodGroup: "O+",
+    chronicConditions: "",
+    allergies: "",
+    emergencyContact: "",
+  });
 
   const [selectedCommonChronic, setSelectedCommonChronic] = useState([]);
   const [additionalChronicInputs, setAdditionalChronicInputs] = useState([""]);
   const [erVisitsList, setErVisitsList] = useState([{ transportMode: "Walk-in" }]);
+
+  // Hydrate state properly when editing an existing profile
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        name: initialData.name || "",
+        age: initialData.age || "",
+        bloodGroup: initialData.bloodGroup || "O+",
+        chronicConditions: initialData.chronicConditions || "",
+        allergies: initialData.allergies || "",
+        emergencyContact: initialData.emergencyContact || "",
+      });
+
+      // Parse stored chronic conditions JSON
+      if (initialData.chronicConditions) {
+        try {
+          const parsed = typeof initialData.chronicConditions === "string"
+            ? JSON.parse(initialData.chronicConditions)
+            : initialData.chronicConditions;
+
+          const chronicList = parsed.chronicConditionsList || [];
+          
+          // Separate common diseases from custom additional inputs
+          const commonMatches = chronicList.filter(item => COMMON_CHRONIC_LIST.includes(item));
+          const customInputs = chronicList.filter(item => !COMMON_CHRONIC_LIST.includes(item));
+
+          setSelectedCommonChronic(commonMatches);
+          setAdditionalChronicInputs(customInputs.length > 0 ? customInputs : [""]);
+
+          // Parse ER Visits
+          if (parsed.erVisitsDetails && Array.isArray(parsed.erVisitsDetails) && parsed.erVisitsDetails.length > 0) {
+            setErVisitsList(parsed.erVisitsDetails.map(visit => ({
+              transportMode: visit.transportMode || "Walk-in"
+            })));
+          }
+        } catch (e) {
+          // Fallback if chronicConditions is a raw text string
+          if (typeof initialData.chronicConditions === "string" && initialData.chronicConditions.trim()) {
+            if (COMMON_CHRONIC_LIST.includes(initialData.chronicConditions)) {
+              setSelectedCommonChronic([initialData.chronicConditions]);
+            } else {
+              setAdditionalChronicInputs([initialData.chronicConditions]);
+            }
+          }
+        }
+      }
+    }
+  }, [initialData]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -196,7 +242,7 @@ export default function MedicalProfileForm({ initialData, onSubmit, onCancel, is
         </div>
       </div>
 
-      {/* ER Visits & Individual Transport Mode Section (Multiple Visits Restored) */}
+      {/* ER Visits & Individual Transport Mode Section */}
       <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3 overflow-hidden">
         <div className="flex justify-between items-center">
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
