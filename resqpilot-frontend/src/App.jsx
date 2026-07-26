@@ -6,40 +6,58 @@ import Dashboard from "./pages/Dashboard";
 import FamilyVault from "./pages/FamilyVault";
 import { setCookie, getCookie } from "./utils/cookies";
 
-// 1. We create a helper component to manage the routes and navigation
+// 1. Helper component to manage protected routes and navigation
 function AppRoutes({ user, handleLoginSuccess, handleLogout, theme, toggleTheme }) {
   const navigate = useNavigate();
 
-  // If no user is logged in, restrict them to the Login page
-  if (!user) {
-    return <Login onLoginSuccess={handleLoginSuccess} theme={theme} toggleTheme={toggleTheme} />;
-  }
-
-  // If logged in, provide actual URL routes
   return (
     <Routes>
-      {/* Main URL "/" loads the Dashboard */}
+      {/* 
+        MAIN URL ("/") -> DEFAULT LOAD IS LOGIN
+        If the user is NOT logged in (!user), show the Login page.
+        If they ARE logged in, instantly redirect them to the Dashboard.
+      */}
       <Route 
         path="/" 
         element={
-          <Dashboard
-            onLogout={handleLogout}
-            onNavigateToVault={() => navigate("/vault")} // Changes URL to /vault
-            theme={theme}
-            toggleTheme={toggleTheme}
-          />
+          !user ? (
+            <Login onLoginSuccess={handleLoginSuccess} theme={theme} toggleTheme={toggleTheme} />
+          ) : (
+            <Navigate to="/dashboard" replace />
+          )
         } 
       />
 
-      {/* URL "/vault" loads the Family Vault */}
+      {/* DASHBOARD URL */}
+      <Route 
+        path="/dashboard" 
+        element={
+          user ? (
+            <Dashboard
+              onLogout={handleLogout}
+              onNavigateToVault={() => navigate("/vault")} // Changes URL to /vault
+              theme={theme}
+              toggleTheme={toggleTheme}
+            />
+          ) : (
+            <Navigate to="/" replace /> // Protect route: kick back to login if not logged in
+          )
+        } 
+      />
+
+      {/* FAMILY VAULT URL */}
       <Route 
         path="/vault" 
         element={
-          <FamilyVault onBack={() => navigate("/")} /> // Changes URL back to /
+          user ? (
+            <FamilyVault onBack={() => navigate("/dashboard")} /> // Changes URL back to /dashboard
+          ) : (
+            <Navigate to="/" replace /> // Protect route: kick back to login if not logged in
+          )
         } 
       />
 
-      {/* Fallback for any unknown URLs: redirect to Dashboard */}
+      {/* Fallback for any unknown URLs: Kick back to Main URL (Login) */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -52,6 +70,7 @@ export default function App() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
 
+  // Handle Dark/Light mode toggling
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") {
@@ -64,6 +83,7 @@ export default function App() {
 
   const toggleTheme = () => setTheme(prev => (prev === "light" ? "dark" : "light"));
 
+  // Check for existing login session on initial load
   useEffect(() => {
     const savedSession = getCookie("resqpilot_session");
     if (savedSession) {
@@ -76,6 +96,7 @@ export default function App() {
     setSessionChecked(true);
   }, []);
 
+  // Handle successful login
   const handleLoginSuccess = (userData) => {
     const role = userData.role || (userData.name?.split("@")[0] === "driver" ? "driver" : "citizen");
     setCookie("resqpilot_session", JSON.stringify({ user: userData, role }), 7);
@@ -83,12 +104,14 @@ export default function App() {
     store.setRole(role);
   };
 
+  // Handle logout
   const handleLogout = () => {
     store.setUser(null);
     store.setRole("citizen");
     setCookie("resqpilot_session", "", -1);
   };
 
+  // Show a loading spinner while checking cookies so it doesn't flash the login screen inappropriately 
   if (!sessionChecked) {
     return (
       <div className="min-h-screen flex justify-center items-center gap-4">
@@ -100,7 +123,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Wrap everything in the Router */}
       <Router>
         <AppRoutes 
           user={user} 

@@ -379,7 +379,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(externalApiPayload)
-          }).then(res => res.json()).then(data => console.log("Predicted Ambulance Index:", data.predicted_idx)).catch(apiErr => console.error("External API error:", apiErr));
+          }).then(res => res.json()).then(data => console.log("Predicted Ambulance Index:", data.triage_level)).catch(apiErr => console.error("External API error:", apiErr));
         } catch (e) {}
 
         const missionDetails = {

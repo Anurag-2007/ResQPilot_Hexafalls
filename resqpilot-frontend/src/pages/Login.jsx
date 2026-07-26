@@ -37,7 +37,9 @@ export default function Login({ onLoginSuccess, theme, toggleTheme }) {
 
       <main className="flex-1 flex flex-col items-center justify-center px-4 pb-12">
         <div className="text-center max-w-2xl mx-auto mb-10">
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4">Fast Response.Better Outcomes</h1>
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4">Rapid Dispatch.</h1>
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4">Intelligent Routing.</h1>
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4">Lifesaving Results.</h1>
           <p className="text-slate-600 dark:text-slate-400 text-lg">Select your portal to enter the emergency system.</p>
         </div>
 
