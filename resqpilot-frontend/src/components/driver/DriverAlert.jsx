@@ -8,6 +8,7 @@ import { io } from "socket.io-client";
 const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", { 
   autoConnect: true 
 });
+
 // 5 Mock Ambulances with strategic coordinates and varied triage levels
 const INITIAL_AMBULANCES = [
   { id: "amb-1", name: "Ambulance Alpha", lat: 22.7500, lng: 88.5000, triageLevel: 1 },
@@ -65,7 +66,13 @@ export default function DriverAlert() {
       if (data && data.locationCoordinates) {
         const patientLat = data.locationCoordinates.latitude;
         const patientLng = data.locationCoordinates.longitude;
-        setLatestPatientCoords({ lat: patientLat, lng: patientLng });
+        
+        // IMPORTANT: Capture the exact dispatchId from the citizen payload
+        setLatestPatientCoords({ 
+          lat: patientLat, 
+          lng: patientLng,
+          dispatchId: data.dispatchId 
+        });
 
         window.alert(`🚨 NEW EMERGENCY DISPATCH RECEIVED!\nPatient: ${data.patientProfile?.name || "Unknown"}\nCoordinates: ${patientLat.toFixed(4)}, ${patientLng.toFixed(4)}`);
 
@@ -127,7 +134,8 @@ export default function DriverAlert() {
     useEmergencyStore.setState({ driverPosition: initialPos });
 
     const missionDetails = {
-      id: `emg-${Date.now()}`,
+      // FORCE ID MATCH: Use the citizen's dispatchId so the socket broadcast finds the right record
+      id: latestPatientCoords?.dispatchId || `emg-${Date.now()}`,
       patientName: "Emergency Patient",
       severity: `LEVEL ${chosen.triageLevel} - CRITICAL`,
       distance: `${chosen.distanceKm.toFixed(1)} km away`,
@@ -148,7 +156,7 @@ export default function DriverAlert() {
     setActiveEmergency(missionDetails);
   };
 
-  // Move ambulance along route based on milestone buttons
+  // Move ambulance along route based on milestone buttons & emit to citizen
   const handleMilestoneUpdate = (statusKey, progressRatio) => {
     if (!activeEmergency) return;
     
@@ -158,8 +166,16 @@ export default function DriverAlert() {
       newPos = activeEmergency.routePoints[Math.min(idx, activeEmergency.routePoints.length - 1)];
     }
 
+    // 1. Update Local Driver View
     useEmergencyStore.setState({
       activeEmergency: { ...activeEmergency, status: statusKey },
+      driverPosition: newPos
+    });
+
+    // 2. Broadcast EXACT position back to the Citizen portal via WebSockets
+    socket.emit("driver_milestone_update", {
+      dispatchId: activeEmergency.id,
+      status: statusKey,
       driverPosition: newPos
     });
   };
@@ -319,8 +335,6 @@ export default function DriverAlert() {
           <Navigation className="w-4 h-4" /> Route to Mission (OSRM Enabled)
         </button>
       </div>
-
-     
     </div>
   );
 }

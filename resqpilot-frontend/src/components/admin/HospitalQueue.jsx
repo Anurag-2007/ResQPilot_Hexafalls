@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Activity, Clock, Truck, AlertTriangle, CheckCircle2, Bed, 
   Thermometer, ChevronDown, ChevronUp, Plus, Minus, User, 
@@ -106,6 +106,7 @@ export default function HospitalQueue() {
   const [selectedHospitalForView, setSelectedHospitalForView] = useState(null);
   const [editingHospitalId, setEditingHospitalId] = useState(null);
   const [editForm, setEditForm] = useState({ icuBeds: 0, wardBudget: 0 });
+  const [predictedHospitalId, setPredictedHospitalId] = useState(null);
 
   // Global Filter states
   const [cardiologyFilter, setCardiologyFilter] = useState("all"); 
@@ -115,33 +116,11 @@ export default function HospitalQueue() {
   const [hospitalQueues, setHospitalQueues] = useState({});
   const [expandedId, setExpandedId] = useState(null);
 
-  // Send Hospital details payload to external API endpoint on mount using the requested format
+  // Ref to access latest hospitals state inside websocket listener safely
+  const hospitalsRef = useRef(hospitals);
   useEffect(() => {
-    const postHospitalsData = async () => {
-      try {
-        const externalApiPayload = {
-          desc: JSON.stringify(INITIAL_HOSPITALS)
-        };
-
-        const response = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_hospital", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(externalApiPayload)
-        });
-
-        if (!response.ok) {
-          console.error("External prediction API error status:", response.status);
-        } else {
-          const data = await response.json();
-          console.log("Successfully posted hospitals to external API:", data);
-        }
-      } catch (apiErr) {
-        console.error("Failed to post payload to external API:", apiErr);
-      }
-    };
-
-    postHospitalsData();
-  }, []);
+    hospitalsRef.current = hospitals;
+  }, [hospitals]);
 
   // Live ETA countdown timer loop updated every second
   useEffect(() => {
@@ -174,8 +153,9 @@ export default function HospitalQueue() {
   }, []);
 
   // Listen for real-time dispatches from backend server via WebSockets
+  // AND trigger get_hospital API call ONLY ONCE per emergency dispatch
   useEffect(() => {
-    const handleIncomingAlert = (payload) => {
+    const handleIncomingAlert = async (payload) => {
       console.log("Real-time dispatch captured in HospitalQueue:", payload);
 
       if (!payload || !payload.dispatchId) return;
@@ -188,61 +168,88 @@ export default function HospitalQueue() {
         const pLat = payload.locationCoordinates.latitude;
         const pLng = payload.locationCoordinates.longitude;
 
-        setHospitals(prevHospitals => {
-          // Calculate exact distances and ETAs upon receiving patient coordinates
-          const evaluated = prevHospitals.map(h => {
-            const distance_km = Number(calculateHaversineDistance(h.lat, h.lng, pLat, pLng).toFixed(1));
-            // ETA (Time_Mins) = dist / 50 (converted to minutes)
-            const time_mins = Math.max(1, Math.round((distance_km / 50) * 60));
-            return {
-              ...h,
-              distanceKm: distance_km,
-              etaMins: time_mins
-            };
-          });
-
-          // Find nearest hospital based on calculated distance
-          const nearest = evaluated.reduce((minObj, curr) => (curr.distanceKm < minObj.distanceKm ? curr : minObj), evaluated[0]);
-          const assignedEtaSecs = (nearest.etaMins || 2) * 60;
-
-          const newIncomingItem = {
-            id: payload.dispatchId,
-            patientName: payload.patientProfile?.name || "Emergency Patient",
-            age: payload.patientProfile?.age || payload.emergencyAssessment?.age || "N/A",
-            bloodGroup: payload.patientProfile?.bloodGroup || "N/A",
-            triageLevel: triageNum,
-            criticalLevel: criticalLevel,
-            wardBudget: nearest.wardBudget,
-            symptoms: `Pain Level: ${payload.emergencyAssessment?.pain_level || 3}/10, Arrival Mode: ${payload.emergencyAssessment?.arrival_mode || 'Ambulance'}, Previous ER Visits: ${payload.emergencyAssessment?.previous_er_visit || 0}`,
-            eta: `${nearest.etaMins || 2}m 0s`,
-            etaSeconds: assignedEtaSecs,
-            status: payload.status || "DISPATCHED",
-            vitals: { 
-              hr: `${payload.emergencyAssessment?.heart_rate ? Math.round(payload.emergencyAssessment.heart_rate) : 83} bpm`, 
-              bp: `${Math.round(payload.emergencyAssessment?.sytolic_bl || 128)}/82`, 
-              spo2: "97%" 
-            },
-            conditions: chronicList.length > 0 ? chronicList : ["No chronic diseases reported"],
-            allergies: payload.patientProfile?.allergies || "None reported",
-            emergencyContact: payload.patientProfile?.emergencyContact || "Not provided",
-            ambulanceId: "UNIT-09 (Advanced Life Support)",
-            driverName: "Paramedic Dispatch Unit",
-            aiNotes: `Routed to ${nearest.name} based on calculated distance (${nearest.distanceKm} km, ETA: ${nearest.etaMins} mins). Critical Level: ${criticalLevel}.`,
-            locationCoordinates: payload.locationCoordinates
+        // 1. Calculate exact distances and ETAs upon receiving patient coordinates
+        const currentEvaluatedHospitals = hospitalsRef.current.map(h => {
+          const distance_km = Number(calculateHaversineDistance(h.lat, h.lng, pLat, pLng).toFixed(1));
+          const time_mins = Math.max(1, Math.round((distance_km / 50) * 60));
+          return {
+            ...h,
+            distanceKm: distance_km,
+            etaMins: time_mins
           };
+        });
 
-          setHospitalQueues(prevQ => {
-            const currentList = prevQ[nearest.id] || [];
-            if (currentList.some(item => item.id === newIncomingItem.id)) {
-              return prevQ;
-            }
-            return {
-              ...prevQ,
-              [nearest.id]: [newIncomingItem, ...currentList]
-            };
+        // Update local hospitals UI with recalculated live distances
+        setHospitals(currentEvaluatedHospitals);
+
+        // 2. Send hospital payload ONLY ON EMERGENCY DISPATCH
+        let targetId = null;
+        try {
+          console.log("Dispatch received. Sending hospital list to get_hospital endpoint...");
+          
+          const response = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_hospital", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(currentEvaluatedHospitals)
           });
 
-          return evaluated;
+          if (!response.ok) {
+            console.error("External prediction API error status:", response.status);
+          } else {
+            const data = await response.json();
+            console.log("Successfully retrieved AI target hospital ID on dispatch:", data.id);
+            targetId = data.id;
+            setPredictedHospitalId(targetId);
+          }
+        } catch (apiErr) {
+          console.error("Failed to post payload to external API on dispatch:", apiErr);
+        }
+
+        // 3. Match hospital based on the returned data.id (or fallback to distance if error)
+        let targetHospital = currentEvaluatedHospitals.find(h => h.id === targetId);
+        
+        if (!targetHospital) {
+          targetHospital = currentEvaluatedHospitals.reduce((minObj, curr) => (curr.distanceKm < minObj.distanceKm ? curr : minObj), currentEvaluatedHospitals[0]);
+        }
+
+        const assignedEtaSecs = (targetHospital.etaMins || 2) * 60;
+
+        const newIncomingItem = {
+          id: payload.dispatchId,
+          patientName: payload.patientProfile?.name || "Emergency Patient",
+          age: payload.patientProfile?.age || payload.emergencyAssessment?.age || "N/A",
+          bloodGroup: payload.patientProfile?.bloodGroup || "N/A",
+          triageLevel: triageNum,
+          criticalLevel: criticalLevel,
+          wardBudget: targetHospital.wardBudget,
+          symptoms: `Pain Level: ${payload.emergencyAssessment?.pain_level || 3}/10, Arrival Mode: ${payload.emergencyAssessment?.arrival_mode || 'Ambulance'}, Previous ER Visits: ${payload.emergencyAssessment?.previous_er_visit || 0}`,
+          eta: `${targetHospital.etaMins || 2}m 0s`,
+          etaSeconds: assignedEtaSecs,
+          status: payload.status || "DISPATCHED",
+          vitals: { 
+            hr: `${payload.emergencyAssessment?.heart_rate ? Math.round(payload.emergencyAssessment.heart_rate) : 83} bpm`, 
+            bp: `${Math.round(payload.emergencyAssessment?.sytolic_bl || 128)}/82`, 
+            spo2: "97%" 
+          },
+          conditions: chronicList.length > 0 ? chronicList : ["No chronic diseases reported"],
+          allergies: payload.patientProfile?.allergies || "None reported",
+          emergencyContact: payload.patientProfile?.emergencyContact || "Not provided",
+          ambulanceId: "UNIT-09 (Advanced Life Support)",
+          driverName: "Paramedic Dispatch Unit",
+          aiNotes: `Routed to ${targetHospital.name} by AI Command based on capacity and distance (${targetHospital.distanceKm} km, ETA: ${targetHospital.etaMins} mins). Critical Level: ${criticalLevel}.`,
+          locationCoordinates: payload.locationCoordinates
+        };
+
+        // 4. Update the queue for the selected target hospital
+        setHospitalQueues(prevQ => {
+          const currentList = prevQ[targetHospital.id] || [];
+          if (currentList.some(item => item.id === newIncomingItem.id)) {
+            return prevQ;
+          }
+          return {
+            ...prevQ,
+            [targetHospital.id]: [newIncomingItem, ...currentList]
+          };
         });
       }
     };
@@ -293,12 +300,6 @@ export default function HospitalQueue() {
     if (neurologyFilter !== "all" && String(h.neurologyDept) !== neurologyFilter) return false;
     return true;
   });
-
-  const nearestHospitalId = filteredHospitals.reduce((minObj, curr) => {
-    if (minObj.distanceKm === null) return curr;
-    if (curr.distanceKm === null) return minObj;
-    return curr.distanceKm < minObj.distanceKm ? curr : minObj;
-  }, filteredHospitals[0])?.id;
 
   const currentHospitalQueue = selectedHospitalForView ? (hospitalQueues[selectedHospitalForView.id] || []) : [];
 
@@ -353,7 +354,8 @@ export default function HospitalQueue() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredHospitals.map((hosp) => {
-              const isNearest = hosp.id === nearestHospitalId;
+              // Highlight the hospital matched by data.id returned from AI
+              const isTarget = hosp.id === predictedHospitalId;
               const isEditing = editingHospitalId === hosp.id;
               const reqCount = (hospitalQueues[hosp.id] || []).length;
 
@@ -361,14 +363,14 @@ export default function HospitalQueue() {
                 <div 
                   key={hosp.id}
                   className={`p-4 rounded-xl border transition-all flex flex-col justify-between relative ${
-                    isNearest 
+                    isTarget 
                       ? "bg-teal-50/60 dark:bg-teal-950/30 border-teal-500 ring-2 ring-teal-500/20 shadow-md" 
                       : "bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800"
                   }`}
                 >
-                  {isNearest && (
+                  {isTarget && (
                     <span className="absolute -top-2.5 right-4 bg-teal-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
-                      Nearest Facility
+                      AI Assigned Facility
                     </span>
                   )}
 
@@ -484,7 +486,7 @@ export default function HospitalQueue() {
               <div className="p-12 text-center flex flex-col items-center justify-center text-slate-500">
                 <CheckCircle2 className="w-12 h-12 text-teal-600/30 mb-3" />
                 <p className="font-bold text-lg text-slate-900 dark:text-slate-100">No active emergency dispatches received for this facility</p>
-                <p className="text-sm">When dispatches occur where this facility is closest, requests will appear exclusively here.</p>
+                <p className="text-sm">When dispatches occur where this facility is chosen, requests will appear exclusively here.</p>
               </div>
             ) : (
               currentHospitalQueue.map((incident) => {

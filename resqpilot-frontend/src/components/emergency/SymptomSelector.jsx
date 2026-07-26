@@ -10,25 +10,59 @@ const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", {
   autoConnect: true
 });
 
-const COMMON_SYMPTOMS = ["Chest Pain", "Shortness of Breath", "Severe Bleeding", "Unconscious", "Seizures", "Severe Burns", "Fractures", "Head Injury", "Stroke Symptoms", "Allergic Reaction", "Burns"];
+// Added Heart and Brain prefixes for categorization
+const COMMON_SYMPTOMS = [
+  "Heart: Chest Pain", "Heart: Irregular Heartbeat", "Heart: Palpitations", 
+  "Brain: Stroke Symptoms", "Brain: Unconscious", "Brain: Seizures", "Brain: Confusion", 
+  "Brain: Severe Headache", "Brain: Slurred Speech", "Brain: Fainting", "Brain: Numbness", 
+  "Shortness of Breath", "Severe Bleeding", "Severe Burns", "Fractures", "Head Injury", "Allergic Reaction"
+];
 
+// Mapped both prefixed (for UI buttons) and unprefixed (for voice NLP) to ensure scores are always applied
 const SYMPTOM_SEVERITY_MAP = {
-  "chest pain": 4,
-  "shortness of breath": 3,
+  "chest pain": 8,
+  "heart: chest pain": 8,
+  "shortness of breath": 7,
   "severe bleeding": 8,
   "unconscious": 9,
-  "seizures": 7,
+  "brain: unconscious": 9,
+  "seizures": 8,
+  "brain: seizures": 8,
   "severe burns": 8,
   "fractures": 5,
-  "head injury": 6,
+  "head injury": 8,
   "stroke symptoms": 9,
+  "brain: stroke symptoms": 9,
   "allergic reaction": 7,
   "burns": 5,
   "heart attack": 9,
-  "heart attak": 9
+  "heart attak": 9,
+  "irregular heartbeat": 7,
+  "heart: irregular heartbeat": 7,
+  "palpitations": 5,
+  "heart: palpitations": 5,
+  "confusion": 7,
+  "brain: confusion": 7,
+  "severe headache": 6,
+  "brain: severe headache": 6,
+  "slurred speech": 8,
+  "brain: slurred speech": 8,
+  "fainting": 6,
+  "brain: fainting": 6,
+  "numbness": 6,
+  "brain: numbness": 6,
+  "dizziness": 5,
+  "brain: dizziness": 5
 };
 
-// Haversine distance calculator
+const INITIAL_AMBULANCES = [
+  { id: "amb-1", name: "Ambulance Alpha", lat: 22.7500, lng: 88.5000, triageLevel: 1 },
+  { id: "amb-2", name: "Ambulance Bravo", lat: 22.4800, lng: 88.3000, triageLevel: 2 },
+  { id: "amb-3", name: "Ambulance Charlie", lat: 22.5800, lng: 88.3700, triageLevel: 3 },
+  { id: "amb-4", name: "Ambulance Delta", lat: 22.3000, lng: 88.1500, triageLevel: 2 },
+  { id: "amb-5", name: "Ambulance Echo", lat: 22.2500, lng: 88.1000, triageLevel: 1 }
+];
+
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -41,13 +75,26 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+const evaluateAmbulanceSelection = (evaluatedList) => {
+  const sortedByDist = [...evaluatedList].sort((a, b) => a.distanceKm - b.distanceKm);
+  let chosen = sortedByDist[0];
+  for (let i = 1; i < sortedByDist.length; i++) {
+    const prev = sortedByDist[i - 1];
+    const curr = sortedByDist[i];
+    if (prev.distanceKm <= curr.distanceKm - 10 && curr.distanceKm >= 20) {
+      chosen = prev;
+      break;
+    }
+  }
+  return chosen;
+};
+
 export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, additionalNotes, onChangeNotes }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [selectedFamilyMemberId, setSelectedFamilyMemberId] = useState("");
 
-  // 🗺️ Active Tracking & Route State mirroring DriverAlert live map layout
   const [activeDispatch, setActiveDispatch] = useState(null);
   const [routeCoordinates, setRouteCoordinates] = useState([]);
 
@@ -56,7 +103,33 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
 
   const toggleSymptom = (s) => onChangeSymptoms(selectedSymptoms.includes(s) ? selectedSymptoms.filter(x => x !== s) : [...selectedSymptoms, s]);
 
-  // Fetch OSRM route identical to DriverAlert implementation
+  // LISTEN FOR DRIVER MOVEMENT TO SYNC LIVE MAP - ROBUST LISTENER
+  useEffect(() => {
+    const handleDriverUpdate = (data) => {
+      console.log("🚑 CITIZEN RECEIVED DRIVER MOVEMENT EVENT:", data);
+      
+      useEmergencyStore.setState((state) => {
+        if (!state.activeEmergency) return state;
+
+        console.log(`🔍 Checking IDs -> Citizen map ID: ${state.activeEmergency.id} | Driver sent ID: ${data.dispatchId}`);
+
+        if (state.activeEmergency.id === data.dispatchId) {
+          console.log("✅ ID MATCH! Forcing Citizen Map to update pins.");
+          return {
+            activeEmergency: { ...state.activeEmergency, status: data.status },
+            driverPosition: data.driverPosition
+          };
+        } else {
+          console.warn("⚠️ ID MISMATCH. Ignoring driver movement.");
+        }
+        return state;
+      });
+    };
+
+    socket.on("driver_milestone_update", handleDriverUpdate);
+    return () => socket.off("driver_milestone_update", handleDriverUpdate);
+  }, []);
+
   const fetchOSRMRoute = async (startLat, startLng, endLat, endLng) => {
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
@@ -77,8 +150,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64String = reader.result.split(",")[1];
-        resolve(base64String);
+        resolve(reader.result.split(",")[1]);
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
@@ -90,15 +162,12 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       let chunks = [];
-
       recorder.ondataavailable = (e) => chunks.push(e.data);
-
       recorder.onstop = async () => {
         const audioBlob = new Blob(chunks, { type: 'audio/webm' });
         await handleGeminiTranscription(audioBlob);
         stream.getTracks().forEach(track => track.stop());
       };
-
       recorder.start();
       setMediaRecorder(recorder);
       setIsRecording(true);
@@ -120,45 +189,33 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const base64Audio = await blobToBase64(audioBlob);
-
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents: [
           "Generate an accurate transcript of this speech to be used as clinical symptom description notes. Return only the plain transcript text without any introductory remarks.",
-          {
-            inlineData: {
-              data: base64Audio,
-              mimeType: "audio/webm"
-            }
-          }
+          { inlineData: { data: base64Audio, mimeType: "audio/webm" } }
         ]
       });
-
       const transcribedText = response.text ? response.text.trim() : "";
       if (transcribedText) {
         onChangeNotes(additionalNotes ? `${additionalNotes} ${transcribedText}` : transcribedText);
       }
     } catch (err) {
       console.error("Gemini Transcription Error:", err);
-      alert("Failed to transcribe audio. Check console for details.");
+      alert("Failed to transcribe audio.");
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const getSymptomScore = (symptomName) => {
-    const key = symptomName.toLowerCase().trim();
-    return SYMPTOM_SEVERITY_MAP[key] || 3;
-  };
+  const getSymptomScore = (symptomName) => SYMPTOM_SEVERITY_MAP[symptomName.toLowerCase().trim()] || 3;
 
   const extractSymptomsFromNotes = (notes) => {
     if (!notes) return [];
     const lowerNotes = notes.toLowerCase();
     const found = [];
     Object.keys(SYMPTOM_SEVERITY_MAP).forEach((symptom) => {
-      if (lowerNotes.includes(symptom)) {
-        found.push(symptom);
-      }
+      if (lowerNotes.includes(symptom)) found.push(symptom);
     });
     return found;
   };
@@ -227,8 +284,10 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
           previousErVisitsCount = 0;
         }
 
+        const exactDispatchId = `disp-${Date.now()}`; // Lock ID at dispatch moment
+
         const dispatchPayload = {
-          dispatchId: `disp-${Date.now()}`,
+          dispatchId: exactDispatchId,
           timestamp: new Date().toISOString(),
           patientProfile: {
             id: member.id,
@@ -253,18 +312,19 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
           status: "DEPARTED"
         };
 
-        // Emit real-time dispatch event over WebSockets to backend server & MongoDB
         socket.emit("citizen_dispatch", dispatchPayload);
 
-        // Fetch exact OSRM route from a simulated starting ambulance coordinate to patient location
-        const ambStartLat = coordinates.latitude + 0.05;
-        const ambStartLng = coordinates.longitude + 0.05;
-        const coords = await fetchOSRMRoute(ambStartLat, ambStartLng, coordinates.latitude, coordinates.longitude);
+        const evaluatedAmbs = INITIAL_AMBULANCES.map(amb => {
+          const distKm = calculateHaversineDistance(amb.lat, amb.lng, coordinates.latitude, coordinates.longitude);
+          return { ...amb, distanceKm: distKm };
+        });
 
-        const initialPos = coords.length > 0 ? coords[0] : { lat: ambStartLat, lng: ambStartLng };
+        const optimalAmb = evaluateAmbulanceSelection(evaluatedAmbs);
+
+        const coords = await fetchOSRMRoute(optimalAmb.lat, optimalAmb.lng, coordinates.latitude, coordinates.longitude);
+        const initialPos = coords.length > 0 ? coords[0] : { lat: optimalAmb.lat, lng: optimalAmb.lng };
         useEmergencyStore.setState({ driverPosition: initialPos });
 
-        // Send payload to external endpoint
         try {
           const externalApiPayload = {
             desc: JSON.stringify({
@@ -276,34 +336,33 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
               arrival_mode: mostSevereArrivalMode,
               heart_rate: 83.19444,
               sytolic_bl: 128.2164,
-              body_temp: 37.24405
-            })
-          };;
+              body_temp: 37.24405,
+              symptoms_list: Array.from(allSymptomsSet),
+              additional_notes: additionalNotes
+            }),
+            lat: coordinates.latitude, 
+            lng: coordinates.longitude,
 
-          await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_ambulance", {
+          };
+
+          fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_ambulance", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(externalApiPayload)
-          });
-        } catch (apiErr) {
-          console.error("Failed to post payload to external API:", apiErr);
-        }
+          }).then(res => res.json()).then(data => console.log("Predicted Ambulance Index:", data.predicted_idx)).catch(apiErr => console.error("External API error:", apiErr));
+        } catch (e) {}
 
         const missionDetails = {
-          id: dispatchPayload.dispatchId,
+          id: exactDispatchId, // Must exactly match the ID we just broadcasted
           patientName: member.name,
-          severity: `LEVEL ${Math.ceil(totalPainLevel / 2)} - CRITICAL`,
-          distance: "Calculating distance...",
-          eta: "2 mins",
+          severity: `LEVEL ${optimalAmb.triageLevel} - CRITICAL`,
+          distance: `${optimalAmb.distanceKm.toFixed(1)} km away`,
+          eta: `${Math.round(optimalAmb.distanceKm * 2.5)} mins`,
           symptoms: descSymptoms.join(", ") || "Acute symptoms recorded",
-          location: {
-            lat: coordinates.latitude,
-            lng: coordinates.longitude,
-            address: "Live Dispatched Patient Location"
-          },
+          location: { lat: coordinates.latitude, lng: coordinates.longitude, address: "Live Dispatched Patient Location" },
           hospital: { name: "Apollo Gleneagles", lat: 22.5780, lng: 88.4100 },
-          assignedAmbulance: "Ambulance Alpha (UNIT-09)",
-          triageLevel: Math.ceil(totalPainLevel / 2),
+          assignedAmbulance: optimalAmb.name,
+          triageLevel: optimalAmb.triageLevel,
           status: "DEPARTED",
           routePoints: coords
         };
@@ -319,7 +378,6 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     );
   };
 
-  // 🛑 Handle Cancellation of Request
   const handleCancelRequest = () => {
     if (window.confirm("Are you sure you want to cancel this emergency dispatch request?")) {
       if (activeDispatch) {
@@ -332,16 +390,18 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     }
   };
 
-  // 🗺️ Exact LiveTrackingMap view as implemented in DriverAlert
   if (activeDispatch || store.activeEmergency) {
     const currentActive = store.activeEmergency || {
       id: activeDispatch?.dispatchId,
       patientName: activeDispatch?.patientProfile?.name || "Patient",
       severity: "CRITICAL",
       status: "DEPARTED",
-      location: { lat: activeDispatch?.locationCoordinates?.latitude || 22.5726, lng: activeDispatch?.locationCoordinates?.longitude || 88.3639 },
-      hospital: { name: "Apollo Gleneagles", lat: 22.5780, lng: 88.4100 },
-      assignedAmbulance: "Ambulance Alpha (UNIT-09)"
+      location: { 
+        lat: activeDispatch?.locationCoordinates?.latitude || 22.5726, 
+        lng: activeDispatch?.locationCoordinates?.longitude || 88.3639 
+      },
+      hospital: { name: "Awaiting AI Assignment", lat: 22.5780, lng: 88.4100 },
+      assignedAmbulance: "Assigning Nearest Unit..."
     };
 
     return (
@@ -371,7 +431,9 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
 
               <div>
                 <span className="block text-[10px] font-bold text-slate-500 uppercase">Assigned Unit</span>
-                <span className="font-bold text-teal-600 dark:text-teal-400">{currentActive.assignedAmbulance}</span>
+                <span className="font-bold text-teal-600 dark:text-teal-400">
+                  {currentActive.assignedAmbulance}
+                </span>
               </div>
 
               <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
@@ -380,7 +442,6 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
               </div>
             </div>
 
-            {/* Cancel Request Action Button */}
             <button
               type="button"
               onClick={handleCancelRequest}
@@ -397,7 +458,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             hospitalLocation={currentActive.hospital}
             driverLocation={store.driverPosition || { lat: 22.5750, lng: 88.3650 }}
             status={currentActive.status}
-            routeCoordinates={routeCoordinates}
+            routeCoordinates={store.activeEmergency?.routePoints || routeCoordinates}
           />
         </div>
       </div>
@@ -406,7 +467,6 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
 
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl space-y-4">
-      {/* Family Vault Selection Section */}
       <div>
         <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">Select Family Vault Profile</label>
         <select
@@ -416,9 +476,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
         >
           <option value="">-- Choose Profile from Family Vault --</option>
           {familyMembers.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name} (Age: {member.age}, Blood: {member.bloodGroup})
-            </option>
+            <option key={member.id} value={member.id}>{member.name} (Age: {member.age}, Blood: {member.bloodGroup})</option>
           ))}
         </select>
       </div>
@@ -448,27 +506,9 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             type="button"
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isProcessing}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${isRecording
-                ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 animate-pulse"
-                : "bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300"
-              }`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${isRecording ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 animate-pulse" : "bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300"}`}
           >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Processing...
-              </>
-            ) : isRecording ? (
-              <>
-                <MicOff className="w-3.5 h-3.5" />
-                Stop Recording
-              </>
-            ) : (
-              <>
-                <Mic className="w-3.5 h-3.5" />
-                Voice Input
-              </>
-            )}
+            {isProcessing ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing...</>) : isRecording ? (<><MicOff className="w-3.5 h-3.5" /> Stop Recording</>) : (<><Mic className="w-3.5 h-3.5" /> Voice Input</>)}
           </button>
         </div>
         <textarea
@@ -479,7 +519,6 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
         />
       </div>
 
-      {/* Confirm Dispatch Action Button */}
       <button
         type="button"
         onClick={handleConfirmDispatch}

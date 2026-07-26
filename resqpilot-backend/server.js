@@ -51,6 +51,13 @@ io.on("connection", (socket) => {
     }
   });
 
+  // 👉 FIXED: This must be INSIDE the io.on("connection") block!
+  socket.on("driver_milestone_update", (data) => {
+    console.log("Driver movement received, broadcasting to citizen:", data.dispatchId);
+    // Broadcast the location update to the Citizen/SymptomSelector tab
+    io.emit("driver_milestone_update", data);
+  });
+
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
