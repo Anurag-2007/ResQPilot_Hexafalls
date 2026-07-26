@@ -14,7 +14,16 @@ const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", {
   autoConnect: true 
 });
 
-// Initial Mock Hospitals Database with coordinates, ward budgets, and independent attributes
+// Identical Mock Ambulances Database from DriverAlert.jsx
+const INITIAL_AMBULANCES = [
+  { id: "amb-1", name: "Ambulance Alpha", lat: 22.7500, lng: 88.5000, triageLevel: 1 },
+  { id: "amb-2", name: "Ambulance Bravo", lat: 22.4800, lng: 88.3000, triageLevel: 2 },
+  { id: "amb-3", name: "Ambulance Charlie", lat: 22.5800, lng: 88.3700, triageLevel: 3 },
+  { id: "amb-4", name: "Ambulance Delta", lat: 22.3000, lng: 88.1500, triageLevel: 2 },
+  { id: "amb-5", name: "Ambulance Echo", lat: 22.2500, lng: 88.1000, triageLevel: 1 }
+];
+
+// Initial Mock Hospitals Database
 const INITIAL_HOSPITALS = [
   {
     id: "hosp-1",
@@ -101,6 +110,19 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Logic EXACTLY mirroring the Driver portal's assignment algorithm
+const evaluateAmbulanceSelection = (evaluatedList) => {
+  const sortedByDist = [...evaluatedList].sort((a, b) => a.distanceKm - b.distanceKm);
+  let chosen = sortedByDist[0];
+  for (let i = 1; i < sortedByDist.length; i++) {
+    if (sortedByDist[i - 1].distanceKm <= sortedByDist[i].distanceKm - 10 && sortedByDist[i].distanceKm >= 20) {
+      chosen = sortedByDist[i - 1];
+      break;
+    }
+  }
+  return chosen;
+};
+
 export default function HospitalQueue() {
   const [hospitals, setHospitals] = useState(INITIAL_HOSPITALS);
   const [selectedHospitalForView, setSelectedHospitalForView] = useState(null);
@@ -168,6 +190,13 @@ export default function HospitalQueue() {
         const pLat = payload.locationCoordinates.latitude;
         const pLng = payload.locationCoordinates.longitude;
 
+        // --- PERFECTLY MIRROR DRIVERALERT.JSX AMBULANCE ASSIGNMENT ---
+        const evaluatedAmbs = INITIAL_AMBULANCES.map(amb => ({
+          ...amb,
+          distanceKm: calculateHaversineDistance(amb.lat, amb.lng, pLat, pLng)
+        }));
+        const optimalAmb = evaluateAmbulanceSelection(evaluatedAmbs);
+
         // 1. Calculate exact distances and ETAs upon receiving patient coordinates
         const currentEvaluatedHospitals = hospitalsRef.current.map(h => {
           const distance_km = Number(calculateHaversineDistance(h.lat, h.lng, pLat, pLng).toFixed(1));
@@ -234,9 +263,12 @@ export default function HospitalQueue() {
           conditions: chronicList.length > 0 ? chronicList : ["No chronic diseases reported"],
           allergies: payload.patientProfile?.allergies || "None reported",
           emergencyContact: payload.patientProfile?.emergencyContact || "Not provided",
-          ambulanceId: "UNIT-09 (Advanced Life Support)",
-          driverName: "Paramedic Dispatch Unit",
-          aiNotes: `Routed to ${targetHospital.name} by AI Command based on capacity and distance (${targetHospital.distanceKm} km, ETA: ${targetHospital.etaMins} mins). Critical Level: ${criticalLevel}.`,
+          
+          // Replaced mock data with the exactly evaluated dynamic ambulance & triage
+          ambulanceId: `${optimalAmb.name} (Triage Level ${optimalAmb.triageLevel})`,
+          driverName: "AI Assigned Paramedic", 
+          
+          aiNotes: `Routed to ${targetHospital.name} by AI Command based on capacity and distance (${targetHospital.distanceKm} km, ETA: ${targetHospital.etaMins} mins). Dispatched ${optimalAmb.name}. Critical Level: ${criticalLevel}.`,
           locationCoordinates: payload.locationCoordinates
         };
 

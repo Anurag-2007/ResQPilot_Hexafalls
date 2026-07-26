@@ -18,6 +18,14 @@ const INITIAL_AMBULANCES = [
   { id: "amb-5", name: "Ambulance Echo", lat: 22.2500, lng: 88.1000, triageLevel: 1 }
 ];
 
+const INITIAL_HOSPITALS = [
+  { id: "hosp-1", name: "Apollo Gleneagles Hospital", lat: 22.5780, lng: 88.4100 },
+  { id: "hosp-2", name: "Fortis Hospital Anandapur", lat: 22.5180, lng: 88.4050 },
+  { id: "hosp-3", name: "AMRI Hospitals Salt Lake", lat: 22.5850, lng: 88.4020 },
+  { id: "hosp-4", name: "Peerless Hospital", lat: 22.4850, lng: 88.3900 },
+  { id: "hosp-5", name: "SSKM Medical College & Hospital", lat: 22.5410, lng: 88.3440 }
+];
+
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -81,7 +89,8 @@ export default function DriverAlert() {
           return {
             ...amb,
             distanceKm: distKm,
-            patientCoords: { lat: patientLat, lng: patientLng }
+            patientCoords: { lat: patientLat, lng: patientLng },
+            targetDispatchId: data.dispatchId
           };
         });
 
@@ -99,9 +108,10 @@ export default function DriverAlert() {
     };
   }, [ambulances]);
 
-  const fetchOSRMRoute = async (startLat, startLng, endLat, endLng) => {
+  const fetchOSRMRoute = async (startLat, startLng, midLat, midLng, endLat, endLng) => {
     try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
+      // 3-waypoint routing
+      const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${midLng},${midLat};${endLng},${endLat}?overview=full&geometries=geojson`;
       const response = await fetch(url);
       const json = await response.json();
       if (json.routes && json.routes.length > 0) {
@@ -127,7 +137,24 @@ export default function DriverAlert() {
     const patientLat = chosen.patientCoords?.lat || latestPatientCoords?.lat || 22.5726;
     const patientLng = chosen.patientCoords?.lng || latestPatientCoords?.lng || 88.3639;
 
-    const coords = await fetchOSRMRoute(chosen.lat, chosen.lng, patientLat, patientLng);
+    // 1. Fetch AI Hospital Assignment
+    const evaluatedHospitals = INITIAL_HOSPITALS.map(h => ({
+      ...h, distanceKm: calculateHaversineDistance(h.lat, h.lng, patientLat, patientLng)
+    }));
+    
+    let targetHospital = evaluatedHospitals[0];
+    try {
+      const res = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_hospital", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(evaluatedHospitals)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        targetHospital = evaluatedHospitals.find(h => h.id === data.id) || targetHospital;
+      }
+    } catch (e) {}
+
+    // 2. Fetch full 3-point route
+    const coords = await fetchOSRMRoute(chosen.lat, chosen.lng, patientLat, patientLng, targetHospital.lat, targetHospital.lng);
     
     // Set initial driver position at the start of the route (resting at start)
     const initialPos = coords.length > 0 ? coords[0] : { lat: chosen.lat, lng: chosen.lng };
@@ -146,7 +173,7 @@ export default function DriverAlert() {
         lng: patientLng, 
         address: "Live Dispatched Patient Location" 
       },
-      hospital: { name: "Apollo Gleneagles", lat: 22.5780, lng: 88.4100 },
+      hospital: { name: targetHospital.name, lat: targetHospital.lat, lng: targetHospital.lng },
       assignedAmbulance: chosen.name,
       triageLevel: chosen.triageLevel,
       status: "DEPARTED",
@@ -181,6 +208,15 @@ export default function DriverAlert() {
   };
 
   const finishEmergency = () => {
+    // Broadcast the final completed status to instantly clear the Citizen's screen
+    if (activeEmergency) {
+      socket.emit("driver_milestone_update", { 
+        dispatchId: activeEmergency.id, 
+        status: "COMPLETED", 
+        driverPosition: store.driverPosition 
+      });
+    }
+
     cancelEmergency();
     setSelectedAmbulanceId(null);
     setCalculatedAmbulances([]);
@@ -189,7 +225,7 @@ export default function DriverAlert() {
     alert("Emergency completed and logged. Back to available status.");
   };
 
-  // 1. ACTIVE EMERGENCY VIEW WITH 5 MILESTONE BUTTONS
+  // 1. ACTIVE EMERGENCY VIEW WITH 6 MILESTONE BUTTONS
   if (activeEmergency) {
     return (
       <div className="flex flex-col lg:flex-row gap-6 w-full">
@@ -215,6 +251,11 @@ export default function DriverAlert() {
                 <span className="text-sm font-bold text-teal-600 dark:text-teal-400">{activeEmergency.assignedAmbulance} (Triage Level: {activeEmergency.triageLevel})</span>
               </div>
 
+              <div>
+                <span className="block text-[10px] font-bold text-slate-500 uppercase">Destination</span>
+                <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{activeEmergency.hospital.name}</span>
+              </div>
+
               <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
                 <span className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Current Status</span>
                 <span className="text-xs font-semibold text-amber-600 uppercase">{activeEmergency.status}</span>
@@ -224,40 +265,26 @@ export default function DriverAlert() {
             {/* Milestone Control Buttons */}
             <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
               <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Ambulance Movement Controls</span>
-              
-              <button 
-                onClick={() => handleMilestoneUpdate("DEPARTED", 0.0)} 
-                className="w-full bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors"
-              >
-                1. Ambulance Departed (Resting at Start)
+              <button onClick={() => handleMilestoneUpdate("DEPARTED_FOR_PATIENT", 0.0)} className="w-full bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors">
+                1. Departed (Start)
               </button>
-
-              <button 
-                onClick={() => handleMilestoneUpdate("EN_ROUTE", 0.25)} 
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors"
-              >
-                2. En Route
+              <button onClick={() => handleMilestoneUpdate("EN_ROUTE_TO_PATIENT", 0.2)} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors">
+                2. En Route to Patient
               </button>
-
-              <button 
-                onClick={() => handleMilestoneUpdate("HALFWAY", 0.50)} 
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors"
-              >
-                3. Halfway to Route
+              <button onClick={() => handleMilestoneUpdate("REACHED_PATIENT", 0.4)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors">
+                3. Reached Patient
               </button>
-
-              <button 
-                onClick={() => handleMilestoneUpdate("REACHED_PATIENT", 1.0)} 
-                className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors"
-              >
-                4. Reached Patient
+              <button onClick={() => handleMilestoneUpdate("DISPATCHED_FROM_PATIENT", 0.45)} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors">
+                4. Dispatched from Patient Loc
               </button>
-
-              <button 
-                onClick={finishEmergency} 
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors mt-2"
-              >
-                5. Complete Handover
+              <button onClick={() => handleMilestoneUpdate("EN_ROUTE_TO_HOSPITAL", 0.7)} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors">
+                5. En Route to Hospital
+              </button>
+              <button onClick={() => handleMilestoneUpdate("REACHED_HOSPITAL", 1.0)} className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors">
+                6. Reached Hospital
+              </button>
+              <button onClick={finishEmergency} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors mt-2">
+                7. Complete Handover
               </button>
             </div>
           </div>

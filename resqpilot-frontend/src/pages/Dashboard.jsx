@@ -96,18 +96,7 @@ export default function Dashboard({ onLogout, onNavigateToVault, theme, toggleTh
             ) : (
               <div className="space-y-6">
                 <Stepper currentStatus={activeEmergency.status} />
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-1 flex flex-col gap-4">
-                    <div className="bg-white dark:bg-slate-900 border p-5 rounded-xl">
-                      <h4 className="font-bold text-sm mb-4">Triage Assessment</h4>
-                      <span className="block text-xs font-semibold text-slate-500">Patient: {activeEmergency.patientName}</span>
-                    </div>
-                    <Button onClick={store.cancelEmergency} variant="secondary" className="text-red-600 border-red-200">Cancel Request</Button>
-                  </div>
-                  <div className="lg:col-span-2 relative h-[400px] md:h-[500px] rounded-xl overflow-hidden border">
-                    <LiveTrackingMap patientLocation={activeEmergency.location} driverLocation={store.driverPosition} status={activeEmergency.status} />
-                  </div>
-                </div>
+                <SymptomSelector selectedSymptoms={selectedSymptoms} onChangeSymptoms={setSelectedSymptoms} additionalNotes={additionalNotes} onChangeNotes={setAdditionalNotes} />
               </div>
             )}
           </>

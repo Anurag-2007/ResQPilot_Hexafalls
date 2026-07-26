@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { AlertCircle, Mic, MicOff, Loader2, ShieldAlert, Navigation, XCircle, ArrowLeft, MapPin } from "lucide-react";
+import { AlertCircle, Mic, MicOff, Loader2, ShieldAlert, Navigation, XCircle, ArrowLeft } from "lucide-react";
 import { GoogleGenAI } from "@google/genai";
 import { useEmergencyStore } from "../../store/useEmergencyStore";
 import LiveTrackingMap from "../maps/LiveTrackingMap";
@@ -63,6 +63,14 @@ const INITIAL_AMBULANCES = [
   { id: "amb-5", name: "Ambulance Echo", lat: 22.2500, lng: 88.1000, triageLevel: 1 }
 ];
 
+const INITIAL_HOSPITALS = [
+  { id: "hosp-1", name: "Apollo Gleneagles Hospital", lat: 22.5780, lng: 88.4100 },
+  { id: "hosp-2", name: "Fortis Hospital Anandapur", lat: 22.5180, lng: 88.4050 },
+  { id: "hosp-3", name: "AMRI Hospitals Salt Lake", lat: 22.5850, lng: 88.4020 },
+  { id: "hosp-4", name: "Peerless Hospital", lat: 22.4850, lng: 88.3900 },
+  { id: "hosp-5", name: "SSKM Medical College & Hospital", lat: 22.5410, lng: 88.3440 }
+];
+
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -92,6 +100,7 @@ const evaluateAmbulanceSelection = (evaluatedList) => {
 export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, additionalNotes, onChangeNotes }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [selectedFamilyMemberId, setSelectedFamilyMemberId] = useState("");
 
@@ -103,7 +112,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
 
   const toggleSymptom = (s) => onChangeSymptoms(selectedSymptoms.includes(s) ? selectedSymptoms.filter(x => x !== s) : [...selectedSymptoms, s]);
 
-  // LISTEN FOR DRIVER MOVEMENT TO SYNC LIVE MAP - ROBUST LISTENER
+  // LISTEN FOR ALL DRIVER MOVEMENT MILESTONES + COMPLETION
   useEffect(() => {
     const handleDriverUpdate = (data) => {
       console.log("🚑 CITIZEN RECEIVED DRIVER MOVEMENT EVENT:", data);
@@ -111,16 +120,22 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
       useEmergencyStore.setState((state) => {
         if (!state.activeEmergency) return state;
 
-        console.log(`🔍 Checking IDs -> Citizen map ID: ${state.activeEmergency.id} | Driver sent ID: ${data.dispatchId}`);
-
         if (state.activeEmergency.id === data.dispatchId) {
-          console.log("✅ ID MATCH! Forcing Citizen Map to update pins.");
+          // If the driver completed the mission, alert user and clear local UI
+          if (data.status === "COMPLETED") {
+            setTimeout(() => {
+              alert("Emergency handover completed and patient admitted. Mission concluded.");
+              setActiveDispatch(null);
+              setRouteCoordinates([]);
+            }, 100);
+            return { activeEmergency: null, driverPosition: null };
+          }
+
+          // Otherwise, proceed rendering normal live position tracking
           return {
             activeEmergency: { ...state.activeEmergency, status: data.status },
             driverPosition: data.driverPosition
           };
-        } else {
-          console.warn("⚠️ ID MISMATCH. Ignoring driver movement.");
         }
         return state;
       });
@@ -130,9 +145,9 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     return () => socket.off("driver_milestone_update", handleDriverUpdate);
   }, []);
 
-  const fetchOSRMRoute = async (startLat, startLng, endLat, endLng) => {
+  const fetchOSRMRoute = async (startLat, startLng, midLat, midLng, endLat, endLng) => {
     try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
+      const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${midLng},${midLat};${endLng},${endLat}?overview=full&geometries=geojson`;
       const response = await fetch(url);
       const json = await response.json();
       if (json.routes && json.routes.length > 0) {
@@ -237,6 +252,8 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
       return;
     }
 
+    setIsDispatching(true);
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const coordinates = {
@@ -321,7 +338,21 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
 
         const optimalAmb = evaluateAmbulanceSelection(evaluatedAmbs);
 
-        const coords = await fetchOSRMRoute(optimalAmb.lat, optimalAmb.lng, coordinates.latitude, coordinates.longitude);
+        // Fetch AI Hospital Assignment identically to the Driver view
+        const evaluatedHospitals = INITIAL_HOSPITALS.map(h => ({ ...h, distanceKm: calculateHaversineDistance(h.lat, h.lng, coordinates.latitude, coordinates.longitude) }));
+        let targetHospital = evaluatedHospitals[0];
+        try {
+          const res = await fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_hospital", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(evaluatedHospitals)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            targetHospital = evaluatedHospitals.find(h => h.id === data.id) || targetHospital;
+          }
+        } catch (e) {}
+
+        const coords = await fetchOSRMRoute(optimalAmb.lat, optimalAmb.lng, coordinates.latitude, coordinates.longitude, targetHospital.lat, targetHospital.lng);
+        console.log("🛣️ [Citizen] OSRM route fetched, point count:", coords.length, coords.slice(0, 2));
         const initialPos = coords.length > 0 ? coords[0] : { lat: optimalAmb.lat, lng: optimalAmb.lng };
         useEmergencyStore.setState({ driverPosition: initialPos });
 
@@ -342,7 +373,6 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             }),
             lat: coordinates.latitude, 
             lng: coordinates.longitude,
-
           };
 
           fetch("https://8000-01kyczz34c5trb0gzwaaht9trq.cloudspaces.litng.ai/get_ambulance", {
@@ -360,7 +390,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
           eta: `${Math.round(optimalAmb.distanceKm * 2.5)} mins`,
           symptoms: descSymptoms.join(", ") || "Acute symptoms recorded",
           location: { lat: coordinates.latitude, lng: coordinates.longitude, address: "Live Dispatched Patient Location" },
-          hospital: { name: "Apollo Gleneagles", lat: 22.5780, lng: 88.4100 },
+          hospital: { name: targetHospital.name, lat: targetHospital.lat, lng: targetHospital.lng },
           assignedAmbulance: optimalAmb.name,
           triageLevel: optimalAmb.triageLevel,
           status: "DEPARTED",
@@ -369,10 +399,12 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
 
         store.setActiveEmergency(missionDetails);
         setActiveDispatch(dispatchPayload);
+        setIsDispatching(false);
       },
       (error) => {
         console.error("Geolocation error:", error);
         alert("Unable to retrieve your location coordinates for dispatch.");
+        setIsDispatching(false);
       },
       { enableHighAccuracy: true }
     );
@@ -405,7 +437,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
     };
 
     return (
-      <div className="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto">
+      <div className="flex flex-col lg:flex-row gap-6 w-full">
         <div className="w-full lg:w-1/3 flex flex-col gap-6">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -435,6 +467,11 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
                   {currentActive.assignedAmbulance}
                 </span>
               </div>
+              
+              <div>
+                <span className="block text-[10px] font-bold text-slate-500 uppercase">Destination</span>
+                <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{currentActive.hospital.name}</span>
+              </div>
 
               <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
                 <span className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Status</span>
@@ -458,7 +495,7 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
             hospitalLocation={currentActive.hospital}
             driverLocation={store.driverPosition || { lat: 22.5750, lng: 88.3650 }}
             status={currentActive.status}
-            routeCoordinates={store.activeEmergency?.routePoints || routeCoordinates}
+            routeCoordinates={routeCoordinates}
           />
         </div>
       </div>
@@ -522,9 +559,30 @@ export default function SymptomSelector({ selectedSymptoms, onChangeSymptoms, ad
       <button
         type="button"
         onClick={handleConfirmDispatch}
-        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-sm shadow transition-colors"
+        disabled={isDispatching}
+        className={`relative w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg text-sm font-bold shadow-lg transition-all duration-200 overflow-hidden ${
+          isDispatching
+            ? "bg-rose-500/80 text-white cursor-wait"
+            : "bg-rose-600 hover:bg-rose-700 active:scale-[0.97] hover:shadow-rose-600/40 shadow-rose-600/20 text-white"
+        }`}
       >
-        <ShieldAlert className="w-4 h-4" /> Confirm Patient Dispatch
+        {!isDispatching && (
+          <span
+            className="absolute inset-0 rounded-lg bg-rose-400/40 animate-ping"
+            style={{ animationDuration: "2.2s" }}
+          ></span>
+        )}
+        <span className="relative z-10 flex items-center gap-2">
+          {isDispatching ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Locating & Dispatching...
+            </>
+          ) : (
+            <>
+              <ShieldAlert className="w-4 h-4 animate-pulse" /> Confirm Patient Dispatch
+            </>
+          )}
+        </span>
       </button>
     </div>
   );
