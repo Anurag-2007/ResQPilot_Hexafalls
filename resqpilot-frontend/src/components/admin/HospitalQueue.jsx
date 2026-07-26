@@ -651,7 +651,7 @@ export default function HospitalQueue() {
 
                               <div className="flex items-center justify-between text-slate-500 pt-1">
                                 <span>Unit: <strong>{incident.ambulanceId}</strong></span>
-                                <span>Paramedic: <strong>{incident.driverName}</strong></span>
+                                {/* <span>Paramedic: <strong>{incident.driverName}</strong></span> */}
                               </div>
                             </div>
                           </div>
