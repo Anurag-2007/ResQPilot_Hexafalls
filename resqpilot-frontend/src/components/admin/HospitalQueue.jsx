@@ -402,7 +402,7 @@ export default function HospitalQueue() {
                 >
                   {isTarget && (
                     <span className="absolute -top-2.5 right-4 bg-teal-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
-                      AI Assigned Facility
+                      Model Assigned Facility
                     </span>
                   )}
 
