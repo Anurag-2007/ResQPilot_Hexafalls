@@ -125,34 +125,77 @@ Stores:
 # 🏗 System Architecture
 
 ```
-                     Citizen Portal
-                           │
-                           │
-                 React + Tailwind UI
-                           │
-                 Socket.IO Client
-                           │
-────────────────────────────────────────────────────
-                    WebSocket Layer
-────────────────────────────────────────────────────
-                           │
-                     Node.js Backend
-                           │
-            ┌──────────────┴──────────────┐
-            │                             │
-      Google GenAI                 Socket.IO Server
-     Speech to text                  Broadcast
-            │                             │
-            └──────────────┬──────────────┘
-                           │
-                    Mongoose ODM
-                           │
-                 MongoDB Atlas Database
-              resqpilot.patients Collection
-                           │
-Hospital Dashboard Clients + Ambulance Dashboard portal
-                           │
-             Live Emergency Queue Management
+              +-----------------------------------+
+                 |           Patient Portal          |
+                 |            (React-Vite)           |
+                 +-----------------+-----------------+
+                                   |
+   +-------------------+-----------+-----------+-------------------+
+   |                   |                       |                   |
+   v                   v                       v                   v
+[ Preform ]       [ Symptoms ]       [ Add Det / Desc ]    [ GPS Coordinates ]
+   |                   |                       |                   |
+   |                   |            (Gemini Speech-to-Text)        |
+   |                   |                       |                   |
+   +-------------------+-----------+-----------+-------------------+
+                                   |
+                                   v
+                             [ JSON Output ]
+                                   |
+         +-------------------------+-------------------------+
+         | (1st)                   | (2nd)                   | (3rd)
+         v                         v                         v
++------------------+      +------------------+        +--------------+
+| Triage Predictor |      | Hospital         |        |   MongoDB    |
+|    ML Model      |      | Predictor        |        +------+-------+
+| (Rule-Based)     |      |                  |               |
+| [FastAPI Wrapper]|      | [FastAPI Wrapper]|               v
++--------+---------+      +--------+---------+    +--------------------------+
+         |                         |              |    Hospital Dashboard    |
+         v                         v              | (Patient Data from Mongo)|
+[ Gives Triage    ]      [ Gives Chosen    ]      +--------------------------+
+[     Level       ]      [ Hospital ID     ]
+         |                         |
+         v                         v
+[ Allocates Amb   ]      [ Coordinates     ]
+[ (based on TL)   ]      [   of Hosp       ]
+         |                         |
+         v                         |
+[ Loads Coords of ]                |
+[ Amb (Initial)   ]                |
+         |                         |
+         +------------+------------+
+                      |
+                      v
+         +--------------------------+
+         |      OpenStreetMap       |
+         |      (Places 3 Pins)     |
+         +------------+-------------+
+                      |
+                      v
+         +--------------------------+
+         |         OSRM API         |
+         +------------+-------------+
+                      |
+                      v
+         [ Gives Preferred Route ]
+                 & ETA
+                      |
+                      v
+         +--------------------------+
+         |       Live Tracking      |
+         | (Patient & Driver Dash)  |
+         +------------+-------------+
+                      |
+         (Via WebSockets Connection)
+                      |
+                      v
+           [ Patient Delivered ]
+                      |
+                      v
+         +--------------------------+
+         |       Session End        |
+         +--------------------------+
 ```
 
 ---
