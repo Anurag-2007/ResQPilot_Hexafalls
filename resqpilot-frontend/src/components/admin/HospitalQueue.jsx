@@ -266,7 +266,7 @@ export default function HospitalQueue() {
           
           // Replaced mock data with the exactly evaluated dynamic ambulance & triage
           ambulanceId: `${optimalAmb.name} (Triage Level ${optimalAmb.triageLevel})`,
-          driverName: "AI Assigned Paramedic", 
+          //driverName: "AI Assigned Paramedic", 
           
           aiNotes: `Routed to ${targetHospital.name} by AI Command based on capacity and distance (${targetHospital.distanceKm} km, ETA: ${targetHospital.etaMins} mins). Dispatched ${optimalAmb.name}. Critical Level: ${criticalLevel}.`,
           locationCoordinates: payload.locationCoordinates
@@ -637,7 +637,7 @@ export default function HospitalQueue() {
                           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
                             <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
                               <span className="flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-teal-600" /> AI Hospital Match Explanation
+                                <Sparkles className="w-4 h-4 text-teal-600" /> Model level Match Explanation
                               </span>
                             </h4>
                             
