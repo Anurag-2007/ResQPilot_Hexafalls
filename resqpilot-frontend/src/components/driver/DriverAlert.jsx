@@ -315,9 +315,9 @@ export default function DriverAlert() {
         <div className="absolute inset-0 bg-teal-500/20 rounded-full animate-ping z-0" style={{ animationDuration: '3s' }}></div>
       </div>
       
-      <h2 className="text-2xl font-bold mb-1">Fleet Command Center (Manual Milestone Tracking)</h2>
+      <h2 className="text-2xl font-bold mb-1">Fleet Command Center </h2>
       <p className="text-slate-500 max-w-md mb-6 text-sm">
-        Waiting for patient dispatches. Ambulance location remains stationary at start until milestone actions are triggered.
+        Waiting for patient dispatches.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 w-full mb-6 text-left">
